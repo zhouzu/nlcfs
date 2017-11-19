@@ -1,5 +1,3 @@
-[![Build Status](https://ci.appveyor.com/api/projects/status/github/ImVexed/nlcfs?branch=master)]
-(https://ci.appveyor.com/project/ImVexed/nlcfs?branch=master)
 # nlcfs (NotLiteCode File System)
 A simple hackable remote file system with in transit encryption using Dokany.
 
