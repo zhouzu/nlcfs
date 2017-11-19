@@ -47,7 +47,7 @@
   <ItemGroup>
     <Compile Include="Client.cs" />
     <Compile Include="Encryption.cs" />
-    <Compile Include="Mirror.cs" />
+    <Compile Include="RemoteDirectory.cs" />
     <Compile Include="NativeMethods.cs" />
     <Compile Include="Program.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />

@@ -42,8 +42,14 @@ namespace nlcfs
 
     #region Prototypes
 
+    public void RegisterClientRoot(string root)
+      => RemoteCall("RegisterClientRoot", root);
+
     public FileInfo[] FindFilesHelper(string fileName, string searchPattern)
       => RemoteCall<FileInfo[]>("FindFilesHelper", fileName, searchPattern);
+
+    public NtStatus CreateFile(string path, FileMode mode, bool isDirectory)
+      => RemoteCall<NtStatus>("CreateFile", path, mode, isDirectory);
 
     public bool Exists(string path, bool isDirectory)
       => RemoteCall<bool>("Exists", path, isDirectory);
@@ -83,6 +89,7 @@ namespace nlcfs
 
     public NtStatus MoveFile(string oldName, string newName, bool replace, bool isDirectory)
       => RemoteCall<NtStatus>("MoveFile", oldName, newName, replace, isDirectory);
+
     #endregion Prototypes
 
     /// <summary>

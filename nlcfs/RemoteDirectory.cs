@@ -11,9 +11,8 @@ using FileAccess = DokanNet.FileAccess;
 
 namespace nlcfs
 {
-  internal class Mirror : IDokanOperations
+  internal class RemoteDirectory : IDokanOperations
   {
-    private readonly string strMountPath;
 
     private const FileAccess DataAccess = FileAccess.ReadData | FileAccess.WriteData | FileAccess.AppendData |
                                           FileAccess.Execute |
@@ -24,16 +23,17 @@ namespace nlcfs
                                                FileAccess.Delete |
                                                FileAccess.GenericWrite;
 
-    public Mirror(string path)
+
+    public void Mount(string mountPath)
     {
-      if (!Directory.Exists(path))
-        throw new ArgumentException(nameof(path));
-      strMountPath = path;
+      client.RegisterClientRoot(mountPath);
+      this.Mount(mountPath, DokanOptions.DebugMode, 1);
     }
 
-    private string GetRPath(string fileName)
+    private T Trace<T>(string name, string file, T result, ConsoleColor color)
     {
-      return fileName.Substring(strMountPath.Length -1);
+      Client.Log($"{name} - {file}: {result}", color);
+      return result;
     }
 
     #region Implementation of IDokanOperations
@@ -41,116 +41,8 @@ namespace nlcfs
     public NtStatus CreateFile(string fileName, FileAccess access, FileShare share, FileMode mode,
         FileOptions options, FileAttributes attributes, DokanFileInfo info)
     {
-      if (info.IsDirectory)
-      {
-        switch (mode)
-        {
-          case FileMode.Open:
-            Client.Log($"OpenDirectory {fileName}");
-            try
-            {
-              if (client.GetAttributes(GetRPath(fileName)).HasFlag(FileAttributes.Directory))
-              {
-                return NtStatus.Success;
-              }
-              else
-              {
-                return NtStatus.ObjectPathNotFound;
-              }
-            }
-            catch
-            {
-              return NtStatus.ObjectPathNotFound;
-            }
-
-          case FileMode.CreateNew:
-            Client.Log($"CreateDirectory {fileName}");
-            try
-            {
-              if (!client.Exists(GetRPath(fileName), true))
-              {
-                return client.Create(GetRPath(fileName), true) ? NtStatus.Success : NtStatus.Error;
-              }
-              else
-              {
-                return NtStatus.ObjectNameCollision;
-              }
-            }
-            catch (Exception e)
-            {
-              return NtStatus.Error;
-            }
-          default:
-            Client.Log($"Error FileMode invalid for directory {mode}", ConsoleColor.Yellow);
-            return NtStatus.Error;
-        }
-      }
-      else
-      {
-        Client.Log($"CreateFile {fileName}");
-        try
-        {
-          switch (mode)
-          {
-            case FileMode.Open:
-              {
-                Client.Log("Open");
-                if (client.Exists(GetRPath(fileName), false))
-                  return NtStatus.Success;
-                else
-                  return NtStatus.ObjectNameNotFound;
-              }
-            case FileMode.CreateNew:
-              {
-                Client.Log("CreateNew");
-                if (client.Exists(GetRPath(fileName), false))
-                  return NtStatus.ObjectNameCollision;
-
-                return client.Create(GetRPath(fileName), false) ? NtStatus.Success : NtStatus.Error;
-              }
-            case FileMode.Create:
-              {
-                Client.Log("Create");
-
-                return client.Create(GetRPath(fileName), false) ? NtStatus.Success : NtStatus.Error;
-              }
-            case FileMode.OpenOrCreate:
-              {
-                Client.Log("OpenOrCreate");
-
-                if (!client.Exists(GetRPath(fileName), false))
-                  return client.Create(GetRPath(fileName), false) ? NtStatus.Success : NtStatus.Error;
-                else
-                  return NtStatus.Success;
-              }
-            case FileMode.Truncate:
-              {
-                Client.Log("Truncate");
-
-                if (!client.Exists(GetRPath(fileName), false))
-                  return NtStatus.ObjectNameNotFound;
-
-                return client.Create(GetRPath(fileName), false) ? NtStatus.Success : NtStatus.Error;
-              }
-            case FileMode.Append:
-              {
-                Client.Log("Append");
-
-                if (client.Exists(GetRPath(fileName), false))
-                  return NtStatus.Success;
-
-                return client.Create(GetRPath(fileName), false) ? NtStatus.Success : NtStatus.Error;
-              }
-            default:
-              Client.Log($"Error unknown FileMode {mode}");
-              return NtStatus.Error;
-          }
-        }
-        catch (Exception e)
-        {
-          return NtStatus.ObjectNameNotFound;
-        }
-      }
+      NtStatus success;
+      return Trace("CreateFile" + (info.IsDirectory ? " Dir" : " File"), fileName, success = client.CreateFile(fileName, mode, info.IsDirectory), success == NtStatus.Success ? ConsoleColor.Green : ConsoleColor.Yellow);      
     }
 
     public void Cleanup(string fileName, DokanFileInfo info)
@@ -166,19 +58,19 @@ namespace nlcfs
       bytesRead = 0;
 
       if (info.IsDirectory)
-        return NtStatus.Error;
+        return Trace("ReadFile", fileName, NtStatus.Error, ConsoleColor.Yellow);
 
-      if (!client.Exists(GetRPath(fileName), false))
-        return NtStatus.ObjectNameNotFound;
+      if (!client.Exists(fileName, false))
+        return Trace("ReadFile", fileName, NtStatus.ObjectNameNotFound, ConsoleColor.Yellow);
 
       Client.Log($"Read {buffer.Length} bytes from {fileName}");
 
-      var tBuf = client.Read(GetRPath(fileName), offset, buffer.Length);
+      var tBuf = client.Read(fileName, offset, buffer.Length);
 
       bytesRead = tBuf.Length;
       buffer = tBuf;
 
-      return NtStatus.Success;
+      return Trace("ReadFile", fileName, NtStatus.Success, ConsoleColor.Green);
     }
 
     public NtStatus WriteFile(string fileName, byte[] buffer, out int bytesWritten, long offset, DokanFileInfo info)
@@ -186,33 +78,33 @@ namespace nlcfs
       bytesWritten = 0;
 
       if (info.IsDirectory)
-        return NtStatus.Error;
+        return Trace("ReadFile", fileName, NtStatus.Error, ConsoleColor.Yellow);
 
-      if (!client.Exists(GetRPath(fileName), false))
-        return NtStatus.ObjectNameNotFound;
+      if (!client.Exists(fileName, false))
+        return Trace("ReadFile", fileName, NtStatus.ObjectNameNotFound, ConsoleColor.Yellow);
 
       Client.Log($"Write {buffer.Length} bytes to {fileName}");
 
-      var size = client.Write(GetRPath(fileName), offset, buffer);
+      var size = client.Write(fileName, offset, buffer);
 
       if (size == -1)
-        return NtStatus.Error;
+        return Trace("ReadFile", fileName, NtStatus.Error, ConsoleColor.Yellow);
 
       bytesWritten = size;
 
-      return NtStatus.Success;
+      return Trace("ReadFile", fileName, NtStatus.Success, ConsoleColor.Green);
     }
 
     public NtStatus FlushFileBuffers(string fileName, DokanFileInfo info)
     {
-      return NtStatus.Success;
+      return Trace("FlushFileBuffers", fileName, NtStatus.Success, ConsoleColor.Green);
     }
 
     public NtStatus GetFileInformation(string fileName, out FileInformation fileInfo, DokanFileInfo info)
     {
-      FileSystemInfo finfo = client.GetFileInfo(GetRPath(fileName));
+      FileSystemInfo finfo = client.GetFileInfo(fileName);
       if (finfo == null)
-        finfo = client.GetDirectoryInfo(GetRPath(fileName));
+        finfo = client.GetDirectoryInfo(fileName);
 
       fileInfo = new FileInformation
       {
@@ -223,12 +115,12 @@ namespace nlcfs
         LastWriteTime = finfo.LastWriteTime,
         Length = /*(finfo as FileInfo)?.Length ??*/ 10,
       };
-      return DokanResult.Success;
+      return Trace("GetFileInformation", fileName, DokanResult.Success, ConsoleColor.Green);
     }
 
     public NtStatus FindFiles(string fileName, out IList<FileInformation> files, DokanFileInfo info)
     {
-      files = client.FindFilesHelper(GetRPath(fileName), "*").Select(finfo => new FileInformation
+      files = client.FindFilesHelper(fileName, "*").Select(finfo => new FileInformation
       {
         FileName = finfo.Name,
         Attributes = finfo.Attributes,
@@ -238,12 +130,12 @@ namespace nlcfs
         Length = (finfo as FileInfo)?.Length ?? 0,
       }).ToArray();
 
-      return DokanResult.Success;
+      return Trace("FindFiles", fileName, DokanResult.Success, ConsoleColor.Green);
     }
 
     public NtStatus FindFilesWithPattern(string fileName, string searchPattern, out IList<FileInformation> files, DokanFileInfo info)
     {
-      files = client.FindFilesHelper(GetRPath(fileName), searchPattern).Select(finfo => new FileInformation
+      files = client.FindFilesHelper(fileName, searchPattern).Select(finfo => new FileInformation
       {
         FileName = finfo.Name,
         Attributes = finfo.Attributes,
@@ -253,33 +145,38 @@ namespace nlcfs
         Length = (finfo as FileInfo)?.Length ?? 10,
       }).ToArray();
 
-      return DokanResult.Success;
+      return Trace("FindFilesWithPattern", fileName, DokanResult.Success, ConsoleColor.Green);
     }
 
     public NtStatus SetFileAttributes(string fileName, FileAttributes attributes, DokanFileInfo info)
     {
-      return client.SetPathAttributes(GetRPath(fileName), attributes);
+      NtStatus success;
+      return Trace("SetFileAttributes", fileName, success = client.SetPathAttributes(fileName, attributes), success == NtStatus.Success ? ConsoleColor.Green : ConsoleColor.Yellow);
     }
 
     public NtStatus SetFileTime(string fileName, DateTime? creationTime, DateTime? lastAccessTime,
         DateTime? lastWriteTime, DokanFileInfo info)
     {
-      return client.SetPathTime(GetRPath(fileName), creationTime, lastAccessTime, lastWriteTime);
+      NtStatus success;
+      return Trace("SetFileTime", fileName, success = client.SetPathTime(fileName, creationTime, lastAccessTime, lastWriteTime), success == NtStatus.Success ? ConsoleColor.Green : ConsoleColor.Yellow);
     }
 
     public NtStatus DeleteFile(string fileName, DokanFileInfo info)
     {
-      return client.DeleteFile(GetRPath(fileName));
+      NtStatus success;
+      return Trace("DeleteFile", fileName, success = client.DeleteFile(fileName), success == NtStatus.Success ? ConsoleColor.Green : ConsoleColor.Yellow);
     }
 
     public NtStatus DeleteDirectory(string fileName, DokanFileInfo info)
     {
-      return client.DeleteDirectory(GetRPath(fileName));
+      NtStatus success;
+      return Trace("DeleteDirectory", fileName, success = client.DeleteDirectory(fileName), success == NtStatus.Success ? ConsoleColor.Green : ConsoleColor.Yellow);
     }
 
     public NtStatus MoveFile(string oldName, string newName, bool replace, DokanFileInfo info)
     {
-      return client.MoveFile(oldName, newName, replace, info.IsDirectory);
+      NtStatus success;
+      return Trace("MoveFile", oldName, success = client.MoveFile(oldName, newName, replace, info.IsDirectory), success == NtStatus.Success ? ConsoleColor.Green : ConsoleColor.Yellow);
     }
 
     public NtStatus SetEndOfFile(string fileName, long length, DokanFileInfo info)
@@ -307,7 +204,7 @@ namespace nlcfs
       freeBytesAvailable = 1024L * 1024 * 1024 * 10;
       totalNumberOfBytes = 1024L * 1024 * 1024 * 20;
       totalNumberOfFreeBytes = 1024L * 1024 * 1024 * 10;
-      return NtStatus.Success;
+      return Trace("GetDiskFreeSpace", string.Empty, NtStatus.Success, ConsoleColor.Green);
     }
 
     public NtStatus GetVolumeInformation(out string volumeLabel, out FileSystemFeatures features,
@@ -320,7 +217,7 @@ namespace nlcfs
                  FileSystemFeatures.PersistentAcls | FileSystemFeatures.SupportsRemoteStorage |
                  FileSystemFeatures.UnicodeOnDisk;
 
-      return NtStatus.Success;
+      return Trace("GetVolumeInformation", volumeLabel, NtStatus.Success, ConsoleColor.Green);
     }
 
     public NtStatus GetFileSecurity(string fileName, out FileSystemSecurity security, AccessControlSections sections, DokanFileInfo info)

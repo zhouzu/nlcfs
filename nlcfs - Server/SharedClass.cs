@@ -7,12 +7,24 @@ namespace nlcfs___Server
 {
   public class SharedClass : IDisposable
   {
-    private string strClientRoot = "C:\\Test\\";
+    public static string strEmulatedRoot = string.Empty;
+    private string strClientRoot = string.Empty;
+
+    public string TranslatePath(string clientPath)
+    {
+      return strEmulatedRoot + clientPath;
+    }
+
+    [NLCCall("RegisterClientRoot")]
+    public void RegisterClientRoot(string root)
+    {
+      strClientRoot = root;
+    }
 
     [NLCCall("FindFilesHelper")]
     public FileInfo[] FindFilesHelper(string fileName, string searchPattern)
     {
-      var files = new DirectoryInfo(strClientRoot + fileName)
+      var files = new DirectoryInfo(TranslatePath(fileName))
           .EnumerateFileSystemInfos()
           .Where(finfo => DokanHelper.DokanIsNameInExpression(searchPattern, finfo.Name, true))
           .Select(finfo => new FileInfo(finfo.FullName))
@@ -21,13 +33,104 @@ namespace nlcfs___Server
       return files;
     }
 
+    [NLCCall("CreateFile")]
+    public NtStatus CreateFile(string path, FileMode mode, bool isDirectory)
+    {
+      if (GetAttributes(path).HasFlag(FileAttributes.Directory))
+      {
+        switch (mode)
+        {
+          case FileMode.Open:
+            try
+            {
+              if (GetAttributes(path).HasFlag(FileAttributes.Directory))
+                return NtStatus.Success;
+              else
+                return NtStatus.ObjectPathNotFound;
+            }
+            catch
+            {
+              return NtStatus.ObjectPathNotFound;
+            }
+
+          case FileMode.CreateNew:
+            try
+            {
+              if (!Exists(path, true))
+                return Create(path, true) ? NtStatus.Success : NtStatus.Error;
+              else
+                return NtStatus.ObjectNameCollision;
+            }
+            catch
+            {
+              return NtStatus.Error;
+            }
+          default:
+            return NtStatus.Error;
+        }
+      }
+      else
+      {
+        try
+        {
+          switch (mode)
+          {
+            case FileMode.Open:
+              {
+                if (Exists(path, false))
+                  return NtStatus.Success;
+                else
+                  return NtStatus.ObjectNameNotFound;
+              }
+            case FileMode.CreateNew:
+              {
+                if (Exists(path, false))
+                  return NtStatus.ObjectNameCollision;
+
+                return Create(path, false)? NtStatus.Success : NtStatus.Error;
+              }
+            case FileMode.Create:
+              {
+                return Create(path, false) ? NtStatus.Success : NtStatus.Error;
+              }
+            case FileMode.OpenOrCreate:
+              {
+                if (!Exists(path, false))
+                  return Create(path, false) ? NtStatus.Success : NtStatus.Error;
+                else
+                  return NtStatus.Success;
+              }
+            case FileMode.Truncate:
+              {
+                if (!Exists(path, false))
+                  return NtStatus.ObjectNameNotFound;
+
+                return Create(path, false) ? NtStatus.Success : NtStatus.Error;
+              }
+            case FileMode.Append:
+              {
+                if (Exists(path, false))
+                  return NtStatus.Success;
+
+                return Create(path, false) ? NtStatus.Success : NtStatus.Error;
+              }
+            default:
+              return NtStatus.Error;
+          }
+        }
+        catch
+        {
+          return NtStatus.Error;
+        }
+      }
+    }
+
     [NLCCall("GetFileInfo")]
     public FileInfo GetFileInfo(string filename)
     {
       try
       {
-        Console.WriteLine(strClientRoot + filename);
-        return new FileInfo(strClientRoot + filename);
+        return new FileInfo(TranslatePath(filename));
       }
       catch { return null; }
     }
@@ -37,7 +140,7 @@ namespace nlcfs___Server
     {
       try
       {
-        return new DirectoryInfo(strClientRoot + directoryname);
+        return new DirectoryInfo(TranslatePath(directoryname));
       }
       catch { return null; }
     }
@@ -45,7 +148,7 @@ namespace nlcfs___Server
     [NLCCall("Exists")]
     public bool Exists(string path, bool isDirectory)
     {
-      return isDirectory ? Directory.Exists(strClientRoot + path) : File.Exists(strClientRoot + path);
+      return isDirectory ? Directory.Exists(TranslatePath(path)) : File.Exists(TranslatePath(path));
     }
 
     [NLCCall("GetAttributes")]
@@ -53,7 +156,7 @@ namespace nlcfs___Server
     {
       try
       {
-        return File.GetAttributes(strClientRoot + path);
+        return File.GetAttributes(TranslatePath(path));
       }
       catch { return FileAttributes.Offline; }
     }
@@ -64,9 +167,9 @@ namespace nlcfs___Server
       try
       {
         if (isDirectory)
-          Directory.CreateDirectory(strClientRoot + path);
+          Directory.CreateDirectory(TranslatePath(path));
         else
-          File.Create(strClientRoot + path).Close();
+          File.Create(TranslatePath(path)).Close();
 
         return true;
       }
@@ -80,7 +183,7 @@ namespace nlcfs___Server
 
       try
       {
-        using (var stream = new FileStream(strClientRoot + path, FileMode.Open))
+        using (var stream = new FileStream(TranslatePath(path), FileMode.Open))
         {
           stream.Position = offset;
           var size = stream.Read(vArray, 0, length);
@@ -96,7 +199,7 @@ namespace nlcfs___Server
     {
       try
       {
-        using (var stream = new FileStream(strClientRoot + path, FileMode.Open))
+        using (var stream = new FileStream(TranslatePath(path), FileMode.Open))
         {
           stream.Position = offset;
           stream.Write(buffer, 0, buffer.Length);
@@ -111,7 +214,7 @@ namespace nlcfs___Server
     {
       try
       {
-        File.SetAttributes(strClientRoot + path, attributes);
+        File.SetAttributes(TranslatePath(path), attributes);
         return NtStatus.Success;
       }
       catch (UnauthorizedAccessException)
@@ -134,13 +237,13 @@ namespace nlcfs___Server
       try
       {
         if (creationTime.HasValue)
-          File.SetCreationTime(strClientRoot + path, creationTime.Value);
+          File.SetCreationTime(TranslatePath(path), creationTime.Value);
 
         if (lastAccessTime.HasValue)
-          File.SetLastAccessTime(strClientRoot + path, lastAccessTime.Value);
+          File.SetLastAccessTime(TranslatePath(path), lastAccessTime.Value);
 
         if (lastWriteTime.HasValue)
-          File.SetLastWriteTime(strClientRoot + path, lastWriteTime.Value);
+          File.SetLastWriteTime(TranslatePath(path), lastWriteTime.Value);
 
         return NtStatus.Success;
       }
@@ -157,18 +260,18 @@ namespace nlcfs___Server
     [NLCCall("DeleteFile")]
     public NtStatus DeleteFile(string path)
     {
-      if (Directory.Exists(strClientRoot + path))
+      if (Directory.Exists(TranslatePath(path)))
         return NtStatus.AccessDenied;
 
-      if (!File.Exists(strClientRoot + path))
+      if (!File.Exists(TranslatePath(path)))
         return NtStatus.ObjectNameNotFound;
 
-      if (File.GetAttributes(strClientRoot + path).HasFlag(FileAttributes.Directory))
+      if (File.GetAttributes(TranslatePath(path)).HasFlag(FileAttributes.Directory))
         return NtStatus.AccessDenied;
 
       try
       {
-        File.Delete(path);
+        File.Delete(TranslatePath(path));
         return NtStatus.Success;
       }
       catch { return NtStatus.Error; }
@@ -177,15 +280,15 @@ namespace nlcfs___Server
     [NLCCall("DeleteDirectory")]
     public NtStatus DeleteDirectory(string path)
     {
-      if (!Directory.Exists(strClientRoot + path))
+      if (!Directory.Exists(TranslatePath(path)))
         return NtStatus.ObjectPathNotFound;
 
-      if (File.Exists(strClientRoot + path))
+      if (File.Exists(TranslatePath(path)))
         return NtStatus.AccessDenied;
 
       try
       {
-        Directory.Delete(path);
+        Directory.Delete(TranslatePath(path));
         return NtStatus.Success;
       }
       catch { return NtStatus.Error; }
@@ -194,16 +297,16 @@ namespace nlcfs___Server
     [NLCCall("MoveFile")]
     public NtStatus MoveFile(string oldName, string newName, bool replace, bool isDirectory)
     {
-      var exist = isDirectory ? Directory.Exists(strClientRoot + newName) : File.Exists(strClientRoot + newName);
+      var exist = isDirectory ? Directory.Exists(TranslatePath(newName)) : File.Exists(TranslatePath(newName));
 
       try
       {
         if (!exist)
         {
           if (isDirectory)
-            Directory.Move(strClientRoot + oldName, strClientRoot + newName);
+            Directory.Move(TranslatePath(oldName), TranslatePath(newName));
           else
-            File.Move(strClientRoot + oldName, strClientRoot + newName);
+            File.Move(TranslatePath(oldName), TranslatePath(newName));
           return NtStatus.Success;
         }
         else if (replace)
@@ -211,8 +314,8 @@ namespace nlcfs___Server
           if (isDirectory) //Cannot replace directory destination - See MOVEFILE_REPLACE_EXISTING
             return NtStatus.AccessDenied;
 
-          File.Delete(strClientRoot + newName);
-          File.Move(strClientRoot + oldName, strClientRoot + newName);
+          File.Delete(TranslatePath(newName));
+          File.Move(TranslatePath(oldName), TranslatePath(newName));
           return NtStatus.Success;
         }
       }

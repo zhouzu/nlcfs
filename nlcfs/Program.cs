@@ -18,15 +18,15 @@ namespace nlcfs
         client = new Client();
         
         client.Start();
-        var mirror = new Mirror("C:");
-        mirror.Mount("M:\\", DokanOptions.DebugMode, 1);
-        
-        Console.ReadLine();
-        Console.WriteLine("Success");
+        var rd = new RemoteDirectory();
+        rd.Mount("M:\\");
+
+        Process.GetCurrentProcess().WaitForExit();
       }
       catch (DokanException ex)
       {
         Console.WriteLine("Error: " + ex.Message);
+        Console.ReadLine();
       }
     }
   }

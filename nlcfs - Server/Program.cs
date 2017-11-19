@@ -13,6 +13,7 @@ namespace nlcfs___Server
     {
       var srv = new Server();
       srv.bDebugLog = true;
+      SharedClass.strEmulatedRoot = "C:\\Test\\";
       srv.Start();
       Process.GetCurrentProcess().WaitForExit();
     }
